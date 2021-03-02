@@ -16,6 +16,8 @@ import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private var imageAnalysis: ImageAnalysis? = null
@@ -43,13 +45,6 @@ class MainActivity : AppCompatActivity() {
             takePicture()
         }
     }
-    private fun getOutputDirectory(): File {
-        val mediaDir = externalMediaDirs.firstOrNull()?.let {
-            File(it, resources.getString(R.string.app_name)).apply { mkdirs() }
-        }
-        return if (mediaDir != null && mediaDir.exists())
-            mediaDir else filesDir
-    }
 
     private fun takePicture() {
         val file = createFile(
@@ -74,28 +69,36 @@ class MainActivity : AppCompatActivity() {
             }
         })
     }
+
+
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         val cameraSelector = CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_BACK).build()
         cameraProviderFuture.addListener({
+            imagePreview = Preview.Builder().apply {
+                setTargetAspectRatio(AspectRatio.RATIO_16_9)
+                setTargetRotation(binding.previewview.display.rotation)
+            }.build()
+            imageAnalysis = ImageAnalysis.Builder().apply {
+                setImageQueueDepth(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            }.build()
             imageCapture = ImageCapture.Builder().apply {
                 setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 setFlashMode(ImageCapture.FLASH_MODE_AUTO)
             }.build()
-            imagePreview = Preview.Builder().apply {
-                setTargetAspectRatio(AspectRatio.RATIO_16_9)
-                setTargetRotation(binding.previewview.display.rotation)
-                imageAnalysis = ImageAnalysis.Builder().apply {
-                    setImageQueueDepth(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                }.build()
-            }.build()
             imageAnalysis?.setAnalyzer(cameraExecutor, LuminosityAnalyzer())
-
             val cameraProvider = cameraProviderFuture.get()
-            val camera = cameraProvider.bindToLifecycle(this, cameraSelector, imagePreview,imageAnalysis,imageCapture)
+            val camera=cameraProvider.bindToLifecycle(this, cameraSelector,imagePreview,imageAnalysis,imageCapture)
             binding.previewview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             imagePreview?.setSurfaceProvider(binding.previewview.surfaceProvider)
         }, ContextCompat.getMainExecutor(this))
+    }
+    private fun getOutputDirectory(): File {
+        val mediaDir = externalMediaDirs.firstOrNull()?.let {
+            File(it, resources.getString(R.string.app_name)).apply { mkdirs() }
+        }
+        return if (mediaDir != null && mediaDir.exists())
+            mediaDir else filesDir
     }
 
     override fun onRequestPermissionsResult(
@@ -112,16 +115,18 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
     }
+
     companion object {
         private const val TAG = "MainActivity"
         private const val FILENAME = "yyyy-MM-dd-HH-mm-ss-SSS"
         private const val PHOTO_EXTENSION = ".jpg"
         private const val REQUEST_CODE_PERMISSIONS = 10
-        private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
-
+        private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA,
+                Manifest.permission.READ_EXTERNAL_STORAGE,Manifest.permission.WRITE_EXTERNAL_STORAGE)
         fun createFile(baseFolder: File, format: String, extension: String) =
                 File(baseFolder, SimpleDateFormat(format, Locale.US)
                         .format(System.currentTimeMillis()) + extension)
@@ -140,11 +145,12 @@ private class LuminosityAnalyzer : ImageAnalysis.Analyzer {
         get(data)   // Copy the buffer into a byte array
         return data // Return the byte array
     }
+
     override fun analyze(image: ImageProxy) {
         val currentTimestamp = System.currentTimeMillis()
         // Calculate the average luma no more often than every second
         if (currentTimestamp - lastAnalyzedTimestamp >=
-                java.util.concurrent.TimeUnit.SECONDS.toMillis(1)) {
+                TimeUnit.SECONDS.toMillis(1)) {
             // Since format in ImageAnalysis is YUV, image.planes[0]
             // contains the Y (luminance) plane
             val buffer = image.planes[0].buffer
@@ -161,4 +167,5 @@ private class LuminosityAnalyzer : ImageAnalysis.Analyzer {
         }
         image.close()
     }
-    }
+
+}
